@@ -179,6 +179,34 @@ pytest tests/ -v
     python -m bsearch.phonetic.report
     ```
 
+### Task 4: Query Expander, Combiners & Search CLI (`bsearch.rank.expand`, `bsearch.rank.searcher`, `bsearch.search`)
+- **Query Expander** ([`expand.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/rank/expand.py)):
+  - Detects native Bengali script tokens vs. Roman/Banglish tokens.
+  - Native Bangla tokens pass through with weight `1.0` (`EXACT_BANGLA`).
+  - Banglish tokens expand into weighted candidates:
+    - `K1_EXACT`: ~1.0
+    - `K2_EXACT`: ~0.7
+    - `K2_FUZZY`: ~0.4 scaled by normalized edit similarity ($1.0 - \text{dist} / \text{len}$)
+    - `K3_SKELETON`: ~0.2
+  - Configurable weights via `ExpansionConfig`.
+  - Caps candidates per query token (default 20).
+  - Prunes and re-ranks candidates using a **Document-Frequency (DF) prior**: $P(t) \propto \log(DF + 1)$ to prefer common corpus terms over rare typos.
+- **Searcher & Combiners** ([`searcher.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/rank/searcher.py)):
+  - Coordinates multi-token query expansion, posting list traversal, and BM25 scoring.
+  - **Two Selectable Combiners**:
+    1. **`max`**: Takes the best candidate score for each token position: $\max_t (w_t \cdot BM25(t, D))$.
+    2. **`saturating_sum`** (default): Sums candidate contributions with diminishing returns per token position: $\frac{\sum S}{1 + \lambda \sum S} \cdot (1 + \lambda)$.
+  - **Explain Mode**: Provides a complete audit trail per hit: token candidate expansions, key levels, matched terms, frequencies, IDF, and weighted BM25 breakdown.
+- **Search CLI** ([`search.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/search.py)):
+  - Fast command-line search interface:
+    ```powershell
+    # Search with default saturating_sum combiner
+    python -m bsearch.search "shikkha"
+
+    # Search with max combiner and explain audit trail
+    python -m bsearch.search "shikkha" --combiner max --explain -k 5
+    ```
+
 ---
 
 ## License & Attribution

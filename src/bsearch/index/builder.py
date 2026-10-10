@@ -265,6 +265,26 @@ def build_index_from_jsonl(
     return stats
 
 
+def build_index_from_docs(
+    docs: list[dict[str, Any]],
+    output_dir: Path | str,
+    params: BM25Params | None = None,
+) -> IndexBuildStats:
+    """Convenience builder to index a list of in-memory document dictionaries."""
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    tmp_jsonl = out_dir / "_temp_docs.jsonl"
+    with open(tmp_jsonl, "w", encoding="utf-8") as f:
+        for doc in docs:
+            f.write(json.dumps(doc, ensure_ascii=False) + "\n")
+
+    try:
+        return build_index_from_jsonl(tmp_jsonl, out_dir, params=params)
+    finally:
+        if tmp_jsonl.exists():
+            tmp_jsonl.unlink()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build bsearch inverted index from JSONL.")
     parser.add_argument("--input", "-i", type=str, required=True, help="Input JSONL path.")
