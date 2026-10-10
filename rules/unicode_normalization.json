@@ -1,0 +1,17 @@
+{
+  "char_replacements": {
+    "॥": "।",
+    "ঽ": "",
+    "\u200B": "",
+    "\u200E": "",
+    "\u200F": "",
+    "\uFEFF": ""
+  },
+  "nukta_compositions": {
+    "\u09A1\u09BC": "ড়",
+    "\u09A2\u09BC": "ঢ়",
+    "\u09AF\u09BC": "য়"
+  },
+  "preserve_zwnj_in_ligatures": true,
+  "strip_isolated_hasant": false
+}

@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "banglish-search"
+version = "0.1.0"
+description = "Pure Python standard-library search engine for Bangla with Banglish phonetic retrieval"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "banglish-search contributors"}]
+
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.28.0",
+]
+
+[project.optional-dependencies]
+eval = [
+    "numpy>=1.26.0",
+    "matplotlib>=3.8.0",
+]
+test = [
+    "pytest>=8.0.0",
+]
+dev = [
+    "numpy>=1.26.0",
+    "matplotlib>=3.8.0",
+    "pytest>=8.0.0",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.28.0",
+]
+
+[project.scripts]
+bsearch-dump = "bsearch.data.dump_parser:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
