@@ -151,6 +151,34 @@ pytest tests/ -v
   - **Process RSS**: 29.40 MB
   - **mmap Load Time**: 52.46 ms
 
+### Task 3: Phonetic Engine & Banglish-to-Bangla Candidates (`bsearch.phonetic`)
+- **Greedy Roman Pattern Parser** ([`parser.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/phonetic/parser.py)):
+  - Driven by editable [`rules/roman_patterns.tsv`](file:///d:/projects/bangla%20search%20engine/rules/roman_patterns.tsv).
+  - Greedy longest-match parser covering all required patterns: `sh`, `s`, `ch`, `chh`, `kh`, `gh`, `ng`, `kkh`, `gg`, `ee`, `oo`, `oi`, `ou`, `w`, `y`, `z`, `j`, `f`, `ph`.
+  - Supports capital letters (`T`, `D`, `R`, `S`, `N`) as optional retroflex hints.
+  - Expands ambiguous chunks up to 8 candidate phonetic spellings.
+- **Grapheme-Aware G2P-lite** ([`g2p.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/phonetic/g2p.py)):
+  - Syllable/grapheme-aware phoneme generator.
+  - Word-initial vs. medial conjunct rules:
+    - `ক্ষ` -> `kh` initial (`ক্ষতি` -> `khoti`), `kkh` medial (`শিক্ষা` -> `shikkha`).
+    - `জ্ঞ` -> `g` initial (`জ্ঞান` -> `gan`), `gg` medial (`বিজ্ঞান` -> `biggan`).
+  - Handles sibilants (`শ, ষ, স`), conjuncts (`ত্র, ত্ব, স্ব, স্ম`), matras, and modifiers (`ং` -> `ng`, `ঃ` -> `h`).
+- **Three-Level Phonetic Keys** ([`keys.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/phonetic/keys.py)):
+  - **K1 (Fine)**: Exact phonetics, normalized lowercase, retroflex hints mapped.
+  - **K2 (Medium)**: Collapses aspiration (`kh->k`, `gh->g`, `chh/ch->c`, `th->t`, `dh->d`, `ph->p`, `bh->b`), gemination (`kk->k`, `kkh->k`, `tt->t`), merges `s/sh -> s`, `j/z -> j`, and `a/o -> a`.
+  - **K3 (Skeleton)**: Consonant skeleton with vowels stripped and adjacent identical consonants collapsed.
+- **Phonetic Index & Fuzzy Retrieval** ([`index.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/phonetic/index.py)):
+  - Inverted mappings for K1, K2, and K3 keys to Bangla vocabulary terms.
+  - Padded character-trigram inverted index over K2 keys.
+  - Pure Python hand-written **Damerau-Levenshtein** distance ([`distance.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/phonetic/distance.py)) supporting insertions, deletions, substitutions, and transpositions.
+  - Adaptive cutoff: distance $\le 1$ for keys $\le 5$ chars, else $\le 2$.
+  - **Ambiguity Validation**: `shikkha`, `sikkha`, and `shikha` all reach `শিক্ষা` (top rank 1.0 or 0.85); `shikha` also reaches `শিখা` (score 1.0).
+- **Rules Report CLI** ([`report.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/phonetic/report.py)):
+  - Generates comprehensive tables of Roman patterns, G2P mappings, K1/K2/K3 transforms, and ambiguity resolutions:
+    ```powershell
+    python -m bsearch.phonetic.report
+    ```
+
 ---
 
 ## License & Attribution
