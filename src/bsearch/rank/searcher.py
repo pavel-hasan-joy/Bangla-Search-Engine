@@ -30,7 +30,7 @@ from bsearch.rank.expand import (
     TermCandidate,
     TokenExpansion,
 )
-from bsearch.rank.topk import ScoredDoc
+from bsearch.rank.topk import QueryTermStream, ScoredDoc
 from bsearch.unicode.tokenizer import tokenize
 
 
@@ -169,161 +169,263 @@ class Searcher:
         explain: bool = False,
     ) -> SearchResponse:
         """Execute search query with Banglish expansion, BM25 scoring, and ranking."""
+        resp, _ = self._search_internal(query, top_k=top_k, explain=explain, track_timings=False)
+        return resp
+
+    def search_with_stage_timings(
+        self,
+        query: str,
+        top_k: int | None = None,
+    ) -> tuple[SearchResponse, dict[str, float]]:
+        """Execute search query returning both response and nanosecond-level per-stage timings."""
+        return self._search_internal(query, top_k=top_k, explain=False, track_timings=True)
+
+    def _search_internal(
+        self,
+        query: str,
+        top_k: int | None = None,
+        explain: bool = False,
+        track_timings: bool = False,
+    ) -> tuple[SearchResponse, dict[str, float]]:
+        """Internal search core with optional high-resolution stage timing instrumentation."""
+        import time
+
         k = top_k if top_k is not None else self.config.default_top_k
+        t0 = time.perf_counter()
         raw_tokens = tokenize(query)
+        t1 = time.perf_counter()
+        t_tokenize_ms = (t1 - t0) * 1000.0 if track_timings else 0.0
+
         if not raw_tokens or k <= 0:
-            return SearchResponse(
+            resp = SearchResponse(
                 query=query,
                 tokens=raw_tokens,
                 expansions=[],
                 total_hits=0,
                 results=[],
             )
+            return resp, {
+                "tokenize_ms": t_tokenize_ms,
+                "expand_ms": 0.0,
+                "score_ms": 0.0,
+                "fetch_ms": 0.0,
+                "total_ms": t_tokenize_ms,
+            }
 
         # 1. Expand query tokens into weighted candidates
+        t1 = time.perf_counter()
         expansions: list[TokenExpansion] = [
             self.expander.expand_token(tok) for tok in raw_tokens
         ]
+        t2 = time.perf_counter()
+        t_expand_ms = (t2 - t1) * 1000.0 if track_timings else 0.0
 
-        # 2. Gather unique candidate terms that exist in the index
-        # Map: term -> list of (token_idx, weight)
-        term_to_token_refs: dict[str, list[tuple[int, float]]] = {}
-        unique_terms: set[str] = set()
-
+        # Precompute term-to-candidate token mappings and max weights
+        term_to_cands: dict[str, list[tuple[int, float]]] = {}
         for token_idx, exp in enumerate(expansions):
             for cand in exp.candidates:
                 if cand.term in self.index_reader.terms:
-                    unique_terms.add(cand.term)
-                    if cand.term not in term_to_token_refs:
-                        term_to_token_refs[cand.term] = []
-                    term_to_token_refs[cand.term].append((token_idx, cand.weight))
+                    if cand.term not in term_to_cands:
+                        term_to_cands[cand.term] = []
+                    term_to_cands[cand.term].append((token_idx, cand.weight))
 
-        if not unique_terms:
-            return SearchResponse(
+        if not term_to_cands:
+            resp = SearchResponse(
                 query=query,
                 tokens=raw_tokens,
                 expansions=expansions,
                 total_hits=0,
                 results=[],
             )
+            return resp, {
+                "tokenize_ms": t_tokenize_ms,
+                "expand_ms": t_expand_ms,
+                "score_ms": 0.0,
+                "fetch_ms": 0.0,
+                "total_ms": t_tokenize_ms + t_expand_ms,
+            }
 
-        # 3. Initialize postings iterators for active candidate terms
-        # term -> (iterator, idf)
-        streams: dict[str, tuple[BlockPostingIterator, float]] = {}
-        for term in unique_terms:
-            it = self.index_reader.get_iterator(term)
-            if it and it.doc_id is not None:
-                idf = self.scorer.idf(self.index_reader.get_df(term))
-                streams[term] = (it, idf)
-
-        if not streams:
-            return SearchResponse(
-                query=query,
-                tokens=raw_tokens,
-                expansions=expansions,
-                total_hits=0,
-                results=[],
-            )
-
-        # 4. Document-At-A-Time (DAAT) evaluation with candidate combiner
-        heap: list[ScoredDoc] = []
-        total_hits = 0
-        doc_details: dict[int, dict[str, Any]] = {} if explain else {}
-
+        # 2. WAND (Weak AND) dynamic pruning with candidate combiners
+        t2 = time.perf_counter()
         p = self.config.bm25
         avgdl = self.index_reader.avgdl
         combiner = self.config.combiner
         saturating_lambda = self.config.saturating_lambda
         num_tokens = len(expansions)
 
-        while True:
-            # Find next smallest doc_id across active streams
-            min_doc: int | None = None
-            for term, (it, _) in streams.items():
-                cur_doc = it.doc_id
-                if cur_doc is not None and (min_doc is None or cur_doc < min_doc):
-                    min_doc = cur_doc
+        # Initialize active term streams
+        streams: list[QueryTermStream] = []
+        for term, cands in term_to_cands.items():
+            it = self.index_reader.get_iterator(term)
+            if it and it.doc_id is not None:
+                idf = self.scorer.idf(self.index_reader.get_df(term))
+                max_w = max(w for _, w in cands)
+                max_s = self.index_reader.get_term_max_score(term)
+                ub = max_w * max_s
+                if ub <= 0.0:
+                    ub = max_w * idf * (p.k1 + 1.0)
+                streams.append(QueryTermStream(term, it, idf, max_w, ub))
 
-            if min_doc is None:
+        if not streams:
+            resp = SearchResponse(
+                query=query,
+                tokens=raw_tokens,
+                expansions=expansions,
+                total_hits=0,
+                results=[],
+            )
+            return resp, {
+                "tokenize_ms": t_tokenize_ms,
+                "expand_ms": t_expand_ms,
+                "score_ms": 0.0,
+                "fetch_ms": 0.0,
+                "total_ms": t_tokenize_ms + t_expand_ms,
+            }
+
+        heap: list[ScoredDoc] = []
+        threshold = 0.0
+        total_hits = 0
+        doc_details: dict[int, dict[str, Any]] = {} if explain else {}
+
+        # Precompute BM25 coefficients for sub-microsecond evaluation
+        k1 = p.k1
+        k1_plus_1 = k1 + 1.0
+        one_minus_b = 1.0 - p.b
+        b_over_avgdl = p.b / avgdl if avgdl > 0.0 else 0.0
+        title_boost = p.title_boost
+
+        # Cap to top 24 streams by upper bound to avoid processing low-weight terms
+        if len(streams) > 24:
+            streams.sort(key=lambda s: s.upper_bound, reverse=True)
+            streams = streams[:24]
+
+        # Initial sort using C-level __lt__ on QueryTermStream
+        import bisect
+        streams.sort()
+
+        while streams:
+            # Find pivot stream where accumulated upper bound > threshold
+            accumulated_bound = 0.0
+            pivot_idx = -1
+            for i, s in enumerate(streams):
+                accumulated_bound += s.upper_bound
+                if accumulated_bound > threshold:
+                    pivot_idx = i
+                    break
+
+            if pivot_idx == -1:
+                # No remaining document can possibly exceed threshold
                 break
 
-            doc_len = self.docstore.get_doc_len(min_doc)
+            pivot_doc = streams[pivot_idx].doc_id
+            lead_doc = streams[0].doc_id
 
-            # Compute term BM25 scores for terms present in min_doc
-            term_scores: dict[str, tuple[float, int, int, float]] = {}
-            for term, (it, idf) in streams.items():
-                if it.doc_id == min_doc:
-                    b_tf = it.body_tf
-                    t_tf = it.title_tf
-                    raw_bm25 = score_term_bm25(
-                        body_tf=b_tf,
-                        title_tf=t_tf,
-                        doc_len=doc_len,
-                        avgdl=avgdl,
-                        idf=idf,
-                        params=p,
-                    )
-                    term_scores[term] = (raw_bm25, b_tf, t_tf, idf)
-                    it.next_doc()
+            if lead_doc == pivot_doc:
+                # Collect matching streams currently at pivot_doc
+                matching_streams: list[QueryTermStream] = []
+                match_ub = 0.0
+                while streams and streams[0].doc_id == pivot_doc:
+                    s = streams.pop(0)
+                    matching_streams.append(s)
+                    match_ub += s.upper_bound
 
-            # Aggregate scores per token position
-            token_scores_list: list[float] = [0.0] * num_tokens
-            token_breakdown: dict[str, float] = {}
-            match_details: list[TermMatchDetail] = []
+                # Quick upper bound check on matching streams
+                if match_ub > threshold:
+                    doc_len = self.docstore.get_doc_len(pivot_doc)  # type: ignore[arg-type]
+                    len_norm = one_minus_b + b_over_avgdl * doc_len
+                    token_candidate_scores: list[list[float]] = [[] for _ in range(num_tokens)]
 
-            for token_idx in range(num_tokens):
-                tok_str = raw_tokens[token_idx]
-                token_candidate_scores: list[float] = []
+                    if explain:
+                        term_scores: dict[str, tuple[float, int, int, float]] = {}
+                        for s in matching_streams:
+                            b_tf = s.iterator.body_tf
+                            t_tf = s.iterator.title_tf
+                            eff_tf = b_tf + title_boost * t_tf
+                            if eff_tf > 0.0:
+                                tf_comp = (eff_tf * k1_plus_1) / (eff_tf + k1 * len_norm)
+                                raw_bm25 = s.idf * tf_comp
+                            else:
+                                raw_bm25 = 0.0
+                            term_scores[s.term] = (raw_bm25, b_tf, t_tf, s.idf)
 
-                for cand in expansions[token_idx].candidates:
-                    if cand.term in term_scores:
-                        raw_bm25, b_tf, t_tf, idf = term_scores[cand.term]
-                        w_score = cand.weight * raw_bm25
-                        token_candidate_scores.append(w_score)
+                        match_details: list[TermMatchDetail] = []
+                        for s_term, (raw_bm25, b_tf, t_tf, idf_val) in term_scores.items():
+                            for tok_idx, w in term_to_cands[s_term]:
+                                w_score = w * raw_bm25
+                                token_candidate_scores[tok_idx].append(w_score)
+                                match_details.append(
+                                    TermMatchDetail(
+                                        term=s_term,
+                                        body_tf=b_tf,
+                                        title_tf=t_tf,
+                                        idf=round(idf_val, 4),
+                                        raw_bm25=round(raw_bm25, 4),
+                                        candidate_weight=w,
+                                        weighted_bm25=round(w_score, 4),
+                                    )
+                                )
+                    else:
+                        for s in matching_streams:
+                            b_tf = s.iterator.body_tf
+                            t_tf = s.iterator.title_tf
+                            eff_tf = b_tf + title_boost * t_tf
+                            if eff_tf > 0.0:
+                                raw_bm25 = s.idf * ((eff_tf * k1_plus_1) / (eff_tf + k1 * len_norm))
+                                for tok_idx, w in term_to_cands[s.term]:
+                                    token_candidate_scores[tok_idx].append(w * raw_bm25)
+
+                    # Combine scores across query tokens
+                    total_doc_score = 0.0
+                    token_breakdown: dict[str, float] = {}
+
+                    for tok_idx in range(num_tokens):
+                        scores_for_tok = token_candidate_scores[tok_idx]
+                        if not scores_for_tok:
+                            tok_score = 0.0
+                        elif combiner == CombinerType.MAX:
+                            tok_score = max(scores_for_tok)
+                        else:  # CombinerType.SATURATING_SUM
+                            tok_score = apply_saturating_sum(scores_for_tok, saturating_lambda)
+                        total_doc_score += tok_score
+                        if explain:
+                            token_breakdown[raw_tokens[tok_idx]] = round(tok_score, 4)
+
+                    if total_doc_score > 0.0:
+                        total_hits += 1
+
+                    if total_doc_score > threshold:
+                        item = ScoredDoc(score=total_doc_score, doc_id=pivot_doc)  # type: ignore[arg-type]
+                        if len(heap) < k:
+                            heapq.heappush(heap, item)
+                            if len(heap) == k:
+                                threshold = heap[0].score
+                        elif item > heap[0]:
+                            heapq.heapreplace(heap, item)
+                            threshold = heap[0].score
 
                         if explain:
-                            match_details.append(
-                                TermMatchDetail(
-                                    term=cand.term,
-                                    body_tf=b_tf,
-                                    title_tf=t_tf,
-                                    idf=round(idf, 4),
-                                    raw_bm25=round(raw_bm25, 4),
-                                    candidate_weight=cand.weight,
-                                    weighted_bm25=round(w_score, 4),
-                                )
-                            )
+                            doc_details[pivot_doc] = {  # type: ignore[index]
+                                "token_scores": token_breakdown,
+                                "matched_terms": match_details,
+                            }
 
-                # Combine candidate scores for this token position
-                if combiner == CombinerType.MAX:
-                    tok_score = max(token_candidate_scores) if token_candidate_scores else 0.0
-                else:  # CombinerType.SATURATING_SUM
-                    tok_score = apply_saturating_sum(
-                        token_candidate_scores, lambda_param=saturating_lambda
-                    )
+                # Advance matching streams and reinsert using binary search in C
+                for s in matching_streams:
+                    s.next_doc()
+                    if s.doc_id is not None:
+                        bisect.insort(streams, s)
+            else:
+                # Advance lead stream to pivot_doc and reinsert in O(log N)
+                lead_s = streams.pop(0)
+                lead_s.advance(pivot_doc)  # type: ignore[arg-type]
+                if lead_s.doc_id is not None:
+                    bisect.insort(streams, lead_s)
 
-                token_scores_list[token_idx] = tok_score
-                if explain:
-                    token_breakdown[tok_str] = round(tok_score, 4)
+        t3 = time.perf_counter()
+        t_score_ms = (t3 - t2) * 1000.0 if track_timings else 0.0
 
-            total_doc_score = sum(token_scores_list)
-
-            if total_doc_score > 0.0:
-                total_hits += 1
-                item = ScoredDoc(score=total_doc_score, doc_id=min_doc)
-
-                if len(heap) < k:
-                    heapq.heappush(heap, item)
-                elif item > heap[0]:
-                    heapq.heapreplace(heap, item)
-
-                if explain:
-                    doc_details[min_doc] = {
-                        "token_scores": token_breakdown,
-                        "matched_terms": match_details,
-                    }
-
-        # 5. Build ranked result set
+        # 3. Build ranked result set
+        t3 = time.perf_counter()
         sorted_docs = sorted(heap, reverse=True)
         results: list[SearchResult] = []
 
@@ -356,10 +458,22 @@ class Searcher:
                 )
             )
 
-        return SearchResponse(
+        t4 = time.perf_counter()
+        t_fetch_ms = (t4 - t3) * 1000.0 if track_timings else 0.0
+        t_total_ms = (t4 - t0) * 1000.0 if track_timings else 0.0
+
+        resp = SearchResponse(
             query=query,
             tokens=raw_tokens,
             expansions=expansions,
             total_hits=total_hits,
             results=results,
         )
+
+        return resp, {
+            "tokenize_ms": t_tokenize_ms,
+            "expand_ms": t_expand_ms,
+            "score_ms": t_score_ms,
+            "fetch_ms": t_fetch_ms,
+            "total_ms": t_total_ms,
+        }

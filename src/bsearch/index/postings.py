@@ -273,14 +273,11 @@ class BlockPostingIterator:
                 self.last_decoded_doc_id = 0
             self._load_block(target_block)
 
-        # Scan within current block
-        while (
-            self.curr_posting_idx < len(self.curr_docs)
-            and self.curr_docs[self.curr_posting_idx] < target_doc_id
-        ):
-            self.curr_posting_idx += 1
-
-        if self.curr_posting_idx < len(self.curr_docs):
+        # Fast binary search within current block in C
+        import bisect
+        idx = bisect.bisect_left(self.curr_docs, target_doc_id, lo=self.curr_posting_idx)
+        self.curr_posting_idx = idx
+        if idx < len(self.curr_docs):
             self._update_current()
             return self._doc_id
 

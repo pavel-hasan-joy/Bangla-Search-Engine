@@ -34,6 +34,8 @@ class ScoredDoc:
 class QueryTermStream:
     """Encapsulates a query term's posting iterator, IDF, and score upper-bound."""
 
+    __slots__ = ("term", "iterator", "idf", "weight", "upper_bound", "doc_id")
+
     def __init__(
         self,
         term: str,
@@ -48,16 +50,22 @@ class QueryTermStream:
         self.weight = weight
         # Upper bound score contribution: max_score * query_weight
         self.upper_bound = max_score * weight
-
-    @property
-    def doc_id(self) -> int | None:
-        return self.iterator.doc_id
+        self.doc_id: int | None = iterator.doc_id
 
     def next_doc(self) -> int | None:
-        return self.iterator.next_doc()
+        self.doc_id = self.iterator.next_doc()
+        return self.doc_id
 
     def advance(self, target: int) -> int | None:
-        return self.iterator.advance(target)
+        self.doc_id = self.iterator.advance(target)
+        return self.doc_id
+
+    def __lt__(self, other: QueryTermStream) -> bool:
+        if self.doc_id is None:
+            return False
+        if other.doc_id is None:
+            return True
+        return self.doc_id < other.doc_id
 
 
 def daat_top_k(

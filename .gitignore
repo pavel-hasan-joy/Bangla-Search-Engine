@@ -39,9 +39,6 @@ htmlcov/
 *.xml
 data/
 *.jsonl
-results/*.json
-results/*.csv
-results/*.png
 
 # IDE & OS
 .idea/

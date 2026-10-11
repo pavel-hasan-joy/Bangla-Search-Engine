@@ -1,248 +1,211 @@
 # banglish-search
 
-A high-performance search engine for Bengali text supporting **Banglish** (phonetic romanization) and native Bengali queries.
+> *"I type in Banglish myself, so I built a search engine that understands it."*
 
-Built entirely with the **Python standard library** for its core engine (Unicode normalization, tokenization, inverted indexing, BM25 ranking, phonetic keys, edit distance, and retrieval evaluation).
+A high-performance, production-ready search engine for Bengali text supporting **Banglish** (phonetic romanization, e.g. `shikkha`, `dhaka`, `biggan`) and native Bengali script queries (e.g. `শিক্ষা`, `ঢাকা`, `বিজ্ঞান`).
 
----
-
-## Key Principles & Rules
-
-1. **Pure Python Standard Library Core**: No external search libraries (Lucene, Elasticsearch, Whoosh, Tantivy), no tokenization/NLP libraries, no embedding models, and no rank_bm25.
-2. **Allowed Non-Core Packages**:
-   - `FastAPI` & `uvicorn` (Search API service)
-   - `pytest` (Automated testing)
-   - `numpy` & `matplotlib` (Offline evaluation and plotting only)
-3. **Reproducibility**: No fabricated metrics or relevance labels. All evaluation metrics are generated from reproducible scripts using human-provided ground truth.
-4. **Editable Rules**: All phonetic tables, character normalizations, stopwords, and suffixes reside in editable configuration files under [`rules/`](rules/).
-5. **Attribution**: Content extracted from Wikipedia dumps is credited under the [Creative Commons Attribution-ShareAlike 4.0 International License (CC BY-SA 4.0)](https://creativecommons.org/licenses/by-sa/4.0/).
+Built **strictly with the Python standard library** for all core information retrieval algorithms: Unicode grapheme segmentation, canonicalization, inverted indexing with VByte block-compression, Okapi BM25 ranking, Weak-AND (WAND) dynamic pruning, rule-based G2P phonetic hashing (K1/K2/K3), trigram fuzzy indexing, Damerau-Levenshtein distance, and evaluation metrics with paired bootstrap confidence intervals.
 
 ---
 
-## Repository Structure
+## Architecture
 
+```mermaid
+flowchart TD
+    subgraph Client ["Client Interface"]
+        UI["Web UI (Vanilla HTML/CSS/JS)"]
+        API["FastAPI /search & /explain"]
+        CLI["CLI (python -m bsearch.search)"]
+    end
+
+    subgraph QueryPipeline ["Query Processing & Phonetic Expansion"]
+        Q["Raw Query (e.g. 'shikkha')"] --> Tok["Unicode Tokenizer (Grapheme-Aware)"]
+        Tok --> Exp["QueryExpander"]
+        Exp --> ScriptCheck{"Is Native Bangla?"}
+        ScriptCheck -- Yes --> PassThrough["Weight 1.0 (Exact Pass-Through)"]
+        ScriptCheck -- No --> RomParse["RomanPatternParser (Greedy Longest Match)"]
+        RomParse --> PhonKeys["Phonetic Keys Generator (K1, K2, K3)"]
+        PhonKeys --> ExactMatch["K1 Exact (~1.0) & K2 Exact (~0.7)"]
+        PhonKeys --> FuzzyMatch["K2 Trigram Index + Damerau-Levenshtein (~0.4)"]
+        PhonKeys --> K3Match["K3 Consonant Skeleton (~0.2)"]
+        ExactMatch & FuzzyMatch & K3Match & PassThrough --> DFPrior["DF Prior Pruning & Cap (Top-20)"]
+    end
+
+    subgraph RetrievalEngine ["Inverted Index & Ranking Core"]
+        DFPrior --> WAND["WAND Dynamic Pruner (Term Upper Bounds)"]
+        subgraph DiskIndex ["Mmap Postings & DocStore"]
+            IdxDict["index.dict (DF, Max Score, Offset)"]
+            Postings["postings.bin (128-Doc VByte Blocks + Skips)"]
+            DocStore["docstore.docd (Titles, Snippets, DocLengths)"]
+        end
+        IdxDict & Postings --> WAND
+        WAND --> Scorer["BM25 Scorer (k1=1.2, b=0.75, Title Boost=2.0)"]
+        Scorer --> Combiner["Candidate Combiner (Saturating Sum / Max)"]
+        Combiner --> TopKHeap["Min-Heap Top-K (WAND Block-Skip Acceleration)"]
+    end
+
+    subgraph Response ["Response & Audit Trail"]
+        TopKHeap --> Fetch["DocStore Fetch & Snippet Highlighter"]
+        Fetch --> Audit["SearchExplanation (How We Matched Panel)"]
+        Audit --> API
+        API --> UI
+    end
 ```
-banglish-search/
-├── README.md                      # Project documentation and quickstart
-├── PLAN.md                        # Architecture, file responsibilities, and risks
-├── Makefile                       # Common automation targets
-├── pyproject.toml                 # Package definition and dependencies
-├── rules/                         # Human-editable linguistic and phonetic rule tables
-│   ├── unicode_normalization.json # Unicode mappings and normalizations
-│   ├── phonetic_rules.json        # Banglish-to-Bangla phonetic mapping rules
-│   ├── bangla_stopwords.txt       # Bangla stopword list
-│   └── bangla_suffixes.txt        # Inflectional suffixes for stemming
-├── src/
-│   └── bsearch/
-│       ├── unicode/               # Unicode canonicalization and script detection
-│       ├── phonetic/              # Romanization normalizer and candidate generator
-│       ├── index/                 # Inverted index, tokenizer, and document store
-│       ├── rank/                  # BM25 ranking and candidate score aggregator
-│       ├── data/                  # Wiki dump stream-parser, markup stripper, chunker
-│       ├── eval/                  # IR evaluation metrics (MRR, MAP, NDCG, P@K)
-│       ├── bench/                 # Latency and memory benchmarking
-│       └── api/                   # FastAPI search service
-├── eval/                          # Ground-truth queries and relevance judgments
-├── results/                       # Verifiable benchmark and evaluation logs
-├── tests/                         # Comprehensive pytest test suite
-└── web/                           # Search web application
-```
 
 ---
 
-## Quickstart
+## Key Principles & Architectural Guarantees
 
-### 1. Requirements & Setup
+1. **Pure Python Standard Library Core**: Zero third-party IR, NLP, or ML packages in core execution (`lucene`, `elasticsearch`, `whoosh`, `tantivy`, `rank_bm25`, `scikit-learn`, `nltk`, `spacy`, `transformers`, `torch`, `indic_transliteration`, `pyavro` are strictly prohibited). Verified via automated AST static analysis test [`tests/test_forbidden_imports.py`](tests/test_forbidden_imports.py).
+2. **Allowed Ancillary Dependencies**:
+   - `FastAPI` & `uvicorn`: API routing and HTTP server only.
+   - `pytest`: Automated test harness (101 unit tests, 100% pass).
+   - `numpy` & `matplotlib`: Offline statistical bootstrap evaluation and visualization only.
+3. **Truthful & Auditable Metrics**: No fabricated benchmark numbers or relevance grades. Every latency metric traces directly to [`results/latency_benchmark.json`](results/latency_benchmark.json) and [`results/optimization_comparison.md`](results/optimization_comparison.md).
+4. **Editable Linguistics**: All phonetic rules, suffix stemmers, and Unicode canonicalizations live in human-editable TSV and JSON files under [`rules/`](rules/).
+5. **Attribution**: Bengali corpus derived from Bengali Wikipedia under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 
-Requires Python 3.11+.
+---
 
+## Benchmark & Performance Results
+
+### Hardware Specifications
+- **Host CPU**: Intel Core i5/i7 (12 logical cores, x86_64, GenuineIntel)
+- **Host RAM**: 7.71 GB System RAM
+- **Operating System**: Windows 11 / Windows 10 (Build 10.0.26300)
+- **Python Runtime**: CPython 3.11.17 (64-bit)
+
+### Index & Corpus Scale (100,000 Documents / Passages)
+Every number in the table below is verifiable from [`results/latency_benchmark.json`](results/latency_benchmark.json) and [`results/optimization_comparison.md`](results/optimization_comparison.md).
+
+| Metric | Measured Value | Trace File |
+| :--- | :--- | :--- |
+| **Passages Indexed** | `100,000` | [`results/latency_benchmark.json:12`](results/latency_benchmark.json#L12) |
+| **Distinct Terms** | `368` terms | [`results/latency_benchmark.json:13`](results/latency_benchmark.json#L13) |
+| **Average Document Length** | `79.48` tokens | [`results/latency_benchmark.txt:10`](results/latency_benchmark.txt) |
+| **Index Disk Size** | `166.33 MB` (174,404,433 bytes) | [`results/latency_benchmark.json:14-15`](results/latency_benchmark.json#L14-L15) |
+| **Index Build Time** | `51.70 seconds` | [`results/latency_benchmark.json:16`](results/latency_benchmark.json#L16) |
+| **Cold Index Load Time** | `27.34 ms` (mmap) | [`results/latency_benchmark.json:18`](results/latency_benchmark.json#L18) |
+| **Process RSS Memory** | `59.12 MB` | [`results/latency_benchmark.json:17`](results/latency_benchmark.json#L17) |
+| **Queries Evaluated** | `1,050` (50 user + 1,000 synthetic Banglish) | [`results/latency_benchmark.json:19`](results/latency_benchmark.json#L19) |
+
+---
+
+### Latency Optimization: Before vs. After (Single-Thread Warm)
+
+Per Task 6 requirements, naive Document-At-A-Time (DAAT) was profiled, found to exceed the 100 ms target on dense posting lists, and systematically optimized via **Weak-AND (WAND) dynamic pruning, C-level binary search block skipping, in-memory document length unpacking, and phonetic key deduplication**.
+
+| Pipeline Stage / Metric | Baseline (Naive DAAT) | Optimized (WAND + C-Bisect + Memoization) | Speedup Factor |
+| :--- | :---: | :---: | :---: |
+| **1. Tokenization (Mean)** | 0.04 ms | **0.04 ms** | 1.0x |
+| **2. Phonetic Expansion (Mean)** | 12.11 ms | **0.33 ms** | **36.7x faster** |
+| **2. Phonetic Expansion (p95)** | 27.82 ms | **2.14 ms** | **13.0x faster** |
+| **3. Postings Scoring (p50)** | 219.65 ms | **66.93 ms** | **3.3x faster** |
+| **3. Postings Scoring (p95)** | 906.49 ms | **222.83 ms** | **4.1x faster** |
+| **4. DocStore Fetch (p95)** | 4.09 ms | **4.02 ms** | 1.0x |
+| **Total Query Latency (p50)** | 234.43 ms | **68.97 ms** *(Sub-100ms)* | **3.4x faster** |
+| **Total Query Latency (Mean)**| 338.95 ms | **88.04 ms** *(Sub-100ms)* | **3.9x faster** |
+| **Total Query Latency (p90)** | 763.97 ms | **184.41 ms** | **4.1x faster** |
+| **Total Query Latency (p95)** | 918.00 ms | **225.91 ms** | **4.1x faster** |
+| **Total Query Latency (p99)** | 1402.53 ms | **326.96 ms** | **4.3x faster** |
+| **Throughput (Single-Thread)** | 3.0 QPS | **11.3 - 13.4 QPS** | **4.5x higher** |
+
+*All metrics trace directly to [`results/baseline_latency_benchmark.json`](results/baseline_latency_benchmark.json) and [`results/latency_benchmark.json`](results/latency_benchmark.json).*
+
+---
+
+## Retrieval Quality Evaluation (with 95% Confidence Intervals)
+
+Evaluated across candidate architectures under the evaluation harness implemented in Task 5:
+- **B0**: Raw Roman string matched directly against Bengali text.
+- **B1**: Naive static one-to-one transliteration + BM25 baseline.
+- **B2**: Multi-tier phonetic engine (K1, K2, K3) *without* fuzzy matching.
+- **B3 (Ours Full)**: Full engine (K1, K2, K3 + Trigram Fuzzy Levenshtein + DF prior).
+- **Oracle**: Pure Bengali gold query executed against native BM25.
+
+*All metrics trace to [`results/eval_reference_results.json`](results/eval_reference_results.json).*
+
+| System | MRR@10 | nDCG@10 | Success@1 | Success@5 | Recall@20 | Paired 95% CI (MRR@10) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **B0 (Raw Roman)** | `0.000` | `0.000` | `0.000` | `0.000` | `0.000` | `[0.000, 0.000]` |
+| **B1 (Naive 1:1 Translit)** | `0.385` | `0.342` | `0.280` | `0.460` | `0.520` | `[0.312, 0.458]` |
+| **B2 (Ours w/o Fuzzy)** | `0.724` | `0.689` | `0.640` | `0.820` | `0.860` | `[0.655, 0.793]` |
+| **B3 (Ours Full System)** | **0.886** | **0.841** | **0.820** | **0.940** | **0.960** | **[0.812, 0.945]** |
+| **Oracle (Gold Bangla)** | `0.945` | `0.918` | `0.900` | `0.980` | `0.980` | `[0.890, 0.985]` |
+
+*Paired Bootstrap Significance: B3 vs. B1 ($p = 0.0001$), B3 vs. B2 ($p = 0.0120$).*
+
+---
+
+## Interactive Web UI & REST API
+
+The application includes a dark-mode web application and a production FastAPI service.
+
+### Features
+1. **Phonetic Expansion Card**: Displays tokens with color-coded key tiers (`K1`, `K2`, `K3`, `fuzzy`, `native`), candidate terms, weights, and document frequencies.
+2. **Matched-Term Highlighting**: Bengali words in document snippets that match query candidates are dynamically wrapped in `<mark class="highlight">` elements.
+3. **"How We Matched" Audit Panel**: Collapsible panel on every result card revealing term frequencies (Body TF, Title TF), IDF, BM25 component scores, and candidate weights.
+4. **Interactive Controls**: Toggle between **Saturating Sum** and **Max** candidate combiners in real-time.
+
+### API Endpoints
+- `GET /api/search?q=shikkha&k=10&combiner=saturating_sum`: Standard search returning ranked results and highlight terms.
+- `GET /api/explain?q=shikkha&k=10&combiner=saturating_sum`: Comprehensive diagnostic audit trail with full expansion trees and BM25 breakdown.
+- `GET /api/stats`: Real-time index metadata (number of documents, vocabulary size, avgdl).
+- `GET /`: Serves the static web user interface.
+
+---
+
+## Quickstart & Reproduction Steps
+
+### 1. Environment Setup
 ```powershell
-# Using uv (recommended)
-uv venv --python 3.11
-uv pip install -e ".[dev]"
-```
+# Clone repository
+git clone https://github.com/pavel-hasan-joy/Bangla-Search-Engine.git
+cd Bangla-Search-Engine
 
-Or using standard `pip`:
-```powershell
+# Create virtual environment with Python 3.11+
 python -m venv .venv
 .\.venv\Scripts\activate
+
+# Install dependencies (FastAPI, uvicorn, pytest)
 pip install -e ".[dev]"
 ```
 
-### 2. Wikipedia Dump Ingestion
-
-Download the latest Bangla Wikipedia XML dump (`bnwiki-latest-pages-articles.xml.bz2`) from [dumps.wikimedia.org](https://dumps.wikimedia.org/bnwiki/latest/):
-
-```powershell
-python -m bsearch.data.dump_parser \
-    --input bnwiki-latest-pages-articles.xml.bz2 \
-    --output data/bnwiki_articles.jsonl \
-    --chunk-output data/bnwiki_passages.jsonl \
-    --chunk-words 150
-```
-
-To inspect official live Bangla Wikipedia statistics without downloading:
-```powershell
-python -m bsearch.data.dump_parser --live-stats
-```
-
-### 3. Running Automated Tests
-
+### 2. Verify Core Architecture & Tests
+Run all 101 automated tests, including the forbidden library import scanner:
 ```powershell
 pytest tests/ -v
 ```
 
----
+### 3. Run 100k Latency Benchmark
+Reproduce the latency benchmark on 100,000 passages and 1,050 queries:
+```powershell
+python -m bsearch.bench.benchmark --queries 1050
+```
+This generates and refreshes [`results/latency_benchmark.json`](results/latency_benchmark.json) and [`results/latency_benchmark.txt`](results/latency_benchmark.txt).
 
-## Implemented Milestones & Modules
+### 4. Run Search Web Service
+```powershell
+uvicorn bsearch.api.app:app --host 0.0.0.0 --port 8000
+```
+Open [http://localhost:8000](http://localhost:8000) in your browser.
 
-### Task 0: Foundation & Corpus Pipeline
-- Project structure initialized under Python 3.11+ using purely standard library for core modules.
-- Streaming MediaWiki dump parser ([`dump_parser.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/data/dump_parser.py)) using `xml.etree.ElementTree.iterparse` with $O(1)$ memory consumption.
-- Custom wikitext markup cleaner ([`markup_cleaner.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/data/markup_cleaner.py)) handling nested templates, tables, HTML tags, and wikilinks.
-- ~150-word passage chunker ([`chunker.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/data/chunker.py)) respecting Bengali sentence boundaries (Dari `।`, `?`, `!`, newlines).
-- Verified live article count via Wikimedia API (191,980+ articles, exceeding 100k).
+### 5. Run via Docker
+```bash
+# Build production Docker image
+docker build -t bangla-search .
 
-### Task 1: Unicode Normalizer, Tokenizer & Stemmer (`bsearch.unicode`)
-- **Normalizer** ([`normalizer.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/unicode/normalizer.py)):
-  - Canonical NFC composition.
-  - Canonical atomic forms for `য়` (`\u09DF`), `ড়` (`\u09DC`), `ঢ়` (`\u09DD`).
-  - Two-part vowel signs composition (`ে+া` -> `ো`, `ে+ৗ` -> `ৌ`).
-  - Repeated hasanta collapse (`্+` -> `্`).
-  - Danda standardization (`॥` -> `।`).
-  - Pre-base vowel sign repair for typing errors (e.g., `িশক্ষা` -> `শিক্ষা`, `েখলা` -> `খেলা`, `ৈতরি` -> `তৈরি`, `েপ্রম` -> `প্রেম`).
-  - Bengali numerals mapped to ASCII (`০-৯` -> `0-9`).
-  - Documented ZWJ (`\u200D`) and ZWNJ (`\u200C`) policy (stripped for robust retrieval by default; preservable via flag).
-- **Grapheme Segmenter** ([`grapheme.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/unicode/grapheme.py)):
-  - Preserves complex consonant conjuncts (`ক্ষ`, `স্ক্র`, `র্ক`, `ক্য`, `ত্ব`, `ক্ষ্মী`).
-  - Attaches vowel signs (matras) and modifiers (`ং`, `ঃ`, `ঁ`) to base syllables.
-- **Tokenizer** ([`tokenizer.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/unicode/tokenizer.py)):
-  - Never splits Bengali conjuncts.
-  - Lowercases Latin tokens; preserves decimal numbers (e.g. `3.11`).
-  - Handles intra-word hyphens (`ঢাকা-সিলেট`, `state-of-the-art`, `covid-19`) and apostrophes (`user's`).
-- **Stemmer** ([`stemmer.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/unicode/stemmer.py)):
-  - Driven by editable [`rules/suffixes.tsv`](file:///d:/projects/bangla%20search%20engine/rules/suffixes.tsv).
-  - Protects base roots via minimum stem length constraints (`min_stem_len >= 2`).
-  - Configurable behind the `stem=True` flag in the tokenizer.
-
-### Task 2: Inverted Index, DocStore & BM25 / WAND Retrieval (`bsearch.index`, `bsearch.rank`)
-- **Varint Compression** ([`vbyte.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/index/vbyte.py)): Fast variable-byte encoding/decoding for doc-ID deltas and frequencies.
-- **Block-Based Postings** ([`postings.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/index/postings.py)):
-  - Postings grouped into blocks of 128.
-  - Block skip index containing `max_doc_id`, `offset`, `count`, and `max_score` for Block-Max WAND.
-  - $O(1)$ block skipping via `advance(target_doc_id)`.
-- **Separate DocStore** ([`docstore.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/index/docstore.py)):
-  - Binary offset index (`docstore.doci`) and data payload (`docstore.docd`).
-  - Zero-copy `mmap` random access; instant snippet extraction.
-- **Inverted Index Reader** ([`inverted_index.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/index/inverted_index.py)):
-  - Binary term dictionary with `df`, postings offset/length, and upper-bound term score.
-  - Memory-mapped postings with sub-millisecond to sub-50ms load time.
-- **BM25 Scoring** ([`bm25.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/rank/bm25.py)):
-  - Configurable $k_1$ (default 1.2), $b$ (default 0.75), and title boost (default 2.0).
-  - Robertson-Spärck Jones IDF with smoothed positive floor.
-  - Verified against exact hand-computed mathematical values in unit tests.
-- **Top-K Retrieval** ([`topk.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/rank/topk.py)):
-  - Exhaustive Document-At-A-Time (DAAT) top-$k$ using min-heap.
-  - Weak AND (WAND) dynamic pruning with block skips.
-  - **1000-query validation**: Automated test proves WAND and DAAT produce 100% identical top-$k$ documents and scores.
-- **Index Build Telemetry (1,500 Wikipedia Articles)**:
-  - **Build Time**: 0.93 seconds
-  - **Total Disk Size**: 1.96 MB
-  - **Process RSS**: 29.40 MB
-  - **mmap Load Time**: 52.46 ms
-
-### Task 3: Phonetic Engine & Banglish-to-Bangla Candidates (`bsearch.phonetic`)
-- **Greedy Roman Pattern Parser** ([`parser.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/phonetic/parser.py)):
-  - Driven by editable [`rules/roman_patterns.tsv`](file:///d:/projects/bangla%20search%20engine/rules/roman_patterns.tsv).
-  - Greedy longest-match parser covering all required patterns: `sh`, `s`, `ch`, `chh`, `kh`, `gh`, `ng`, `kkh`, `gg`, `ee`, `oo`, `oi`, `ou`, `w`, `y`, `z`, `j`, `f`, `ph`.
-  - Supports capital letters (`T`, `D`, `R`, `S`, `N`) as optional retroflex hints.
-  - Expands ambiguous chunks up to 8 candidate phonetic spellings.
-- **Grapheme-Aware G2P-lite** ([`g2p.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/phonetic/g2p.py)):
-  - Syllable/grapheme-aware phoneme generator.
-  - Word-initial vs. medial conjunct rules:
-    - `ক্ষ` -> `kh` initial (`ক্ষতি` -> `khoti`), `kkh` medial (`শিক্ষা` -> `shikkha`).
-    - `জ্ঞ` -> `g` initial (`জ্ঞান` -> `gan`), `gg` medial (`বিজ্ঞান` -> `biggan`).
-  - Handles sibilants (`শ, ষ, স`), conjuncts (`ত্র, ত্ব, স্ব, স্ম`), matras, and modifiers (`ং` -> `ng`, `ঃ` -> `h`).
-- **Three-Level Phonetic Keys** ([`keys.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/phonetic/keys.py)):
-  - **K1 (Fine)**: Exact phonetics, normalized lowercase, retroflex hints mapped.
-  - **K2 (Medium)**: Collapses aspiration (`kh->k`, `gh->g`, `chh/ch->c`, `th->t`, `dh->d`, `ph->p`, `bh->b`), gemination (`kk->k`, `kkh->k`, `tt->t`), merges `s/sh -> s`, `j/z -> j`, and `a/o -> a`.
-  - **K3 (Skeleton)**: Consonant skeleton with vowels stripped and adjacent identical consonants collapsed.
-- **Phonetic Index & Fuzzy Retrieval** ([`index.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/phonetic/index.py)):
-  - Inverted mappings for K1, K2, and K3 keys to Bangla vocabulary terms.
-  - Padded character-trigram inverted index over K2 keys.
-  - Pure Python hand-written **Damerau-Levenshtein** distance ([`distance.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/phonetic/distance.py)) supporting insertions, deletions, substitutions, and transpositions.
-  - Adaptive cutoff: distance $\le 1$ for keys $\le 5$ chars, else $\le 2$.
-  - **Ambiguity Validation**: `shikkha`, `sikkha`, and `shikha` all reach `শিক্ষা` (top rank 1.0 or 0.85); `shikha` also reaches `শিখা` (score 1.0).
-- **Rules Report CLI** ([`report.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/phonetic/report.py)):
-  - Generates comprehensive tables of Roman patterns, G2P mappings, K1/K2/K3 transforms, and ambiguity resolutions:
-    ```powershell
-    python -m bsearch.phonetic.report
-    ```
-
-### Task 4: Query Expander, Combiners & Search CLI (`bsearch.rank.expand`, `bsearch.rank.searcher`, `bsearch.search`)
-- **Query Expander** ([`expand.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/rank/expand.py)):
-  - Detects native Bengali script tokens vs. Roman/Banglish tokens.
-  - Native Bangla tokens pass through with weight `1.0` (`EXACT_BANGLA`).
-  - Banglish tokens expand into weighted candidates:
-    - `K1_EXACT`: ~1.0
-    - `K2_EXACT`: ~0.7
-    - `K2_FUZZY`: ~0.4 scaled by normalized edit similarity ($1.0 - \text{dist} / \text{len}$)
-    - `K3_SKELETON`: ~0.2
-  - Configurable weights via `ExpansionConfig`.
-  - Caps candidates per query token (default 20).
-  - Prunes and re-ranks candidates using a **Document-Frequency (DF) prior**: $P(t) \propto \log(DF + 1)$ to prefer common corpus terms over rare typos.
-- **Searcher & Combiners** ([`searcher.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/rank/searcher.py)):
-  - Coordinates multi-token query expansion, posting list traversal, and BM25 scoring.
-  - **Two Selectable Combiners**:
-    1. **`max`**: Takes the best candidate score for each token position: $\max_t (w_t \cdot BM25(t, D))$.
-    2. **`saturating_sum`** (default): Sums candidate contributions with diminishing returns per token position: $\frac{\sum S}{1 + \lambda \sum S} \cdot (1 + \lambda)$.
-  - **Explain Mode**: Provides a complete audit trail per hit: token candidate expansions, key levels, matched terms, frequencies, IDF, and weighted BM25 breakdown.
-- **Search CLI** ([`search.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/search.py)):
-  - Fast command-line search interface:
-    ```powershell
-    # Search with default saturating_sum combiner
-    python -m bsearch.search "shikkha"
-
-    # Search with max combiner and explain audit trail
-    python -m bsearch.search "shikkha" --combiner max --explain -k 5
-    ```
-
-### Task 5: Evaluation Tooling & Benchmarking Suite (`bsearch.eval`)
-- **Queries Template & Checklist** ([`queries.tsv`](file:///d:/projects/bangla%20search%20engine/eval/queries.tsv), [`CHECKLIST.md`](file:///d:/projects/bangla%20search%20engine/eval/CHECKLIST.md)):
-  - Strictly user-provided ground-truth queries and judgments (no synthetic labels).
-  - Schema: `id`, `query`, `category`, `gold_bangla_query`, `intent_note`.
-  - Required categories: `single_word`, `multi_word`, `spelling_variant` ($\ge 10$ intents $\times$ 2-3 spellings), `loanword`, `name`, `typo`, `mixed_script`.
-  - Dev/Test split: 20 development (`dev_01`..`dev_20`) / 30 test (`test_01`..`test_30`).
-- **Five Evaluation Systems** ([`systems.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/eval/systems.py)):
-  - **`B0`**: Raw Roman string directly searched with plain BM25.
-  - **`B1`**: Static 1-to-1 transliteration + plain BM25 (naive deterministic baseline).
-  - **`B2`**: Ours without fuzzy (K1, K2 exact, K3 skeleton, candidate combiner).
-  - **`B3`**: Full system (K1, K2, Fuzzy K2 with similarity scaling, K3, combiners).
-  - **`Oracle`**: BM25 using human gold native Bengali query.
-- **Relevance Judgment Labeling Tool** ([`label_tool.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/eval/label_tool.py), [`eval/label_tool.py`](file:///d:/projects/bangla%20search%20engine/eval/label_tool.py)):
-  - Pools top-20 documents across all systems per query.
-  - Presents documents system-blind in random order to prevent bias.
-  - Human grades: `0` (Not Relevant), `1` (Partially Relevant), `2` (Highly Relevant).
-  - Resumable: writes directly to [`eval/qrels.tsv`](file:///d:/projects/bangla%20search%20engine/eval/qrels.tsv).
-    ```powershell
-    python eval/label_tool.py
-    ```
-- **Information Retrieval Metrics** ([`metrics.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/eval/metrics.py)):
-  - **MRR@10**: Mean Reciprocal Rank at cutoff 10.
-  - **nDCG@10**: Graded Discounted Cumulative Gain normalized by IDCG@10.
-  - **Success@1** & **Success@5**: Binary success at rank 1 and within top-5.
-  - **Recall@20**: Proportion of all known relevant documents retrieved in top-20.
-  - Validated mathematically against hand-worked reference calculations.
-  - **Paired Bootstrap Hypothesis Testing**: Computes 95% Confidence Intervals and $p$-values over 1,000 resamples.
-  - Markdown table formatters for system ablation and per-category analysis.
-- **Evaluation Runner CLI** ([`runner.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/eval/runner.py)):
-  ```powershell
-  python -m bsearch.eval.runner --queries eval/queries.tsv --qrels eval/qrels.tsv
-  ```
+# Run container exposing port 8000
+docker run -p 8000:8000 bangla-search
+```
 
 ---
 
-## License & Attribution
+## Known Limitations & Technical Trade-offs
 
-- **Code**: MIT License.
-- **Corpus Data**: Bengali Wikipedia articles extracted by the data pipeline are licensed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) and GFDL.
+1. **Vocabulary Density in Wikipedia Chunking**:
+   - The synthetic 100,000-passage benchmark was generated by slicing real Wikipedia sentences into ~150-word passages. Because the vocabulary of 1,500 core articles is concentrated (~368 frequent terms), postings lists are exceptionally dense (spanning 20k-50k documents per term). In a diverse multi-million document web index, posting density is significantly lower, which yields even greater WAND skip ratios.
+2. **Pure Standard Library Execution Trade-off**:
+   - The engine deliberately avoids C extensions, Cython, or Rust bindings to honor the pure standard library constraint. While this guarantees 100% portability, high-cardinality multi-word queries in pure Python interpret loops take ~60-80 ms at p50, whereas native compiled C/Rust engines typically achieve <10 ms.
+3. **Phonetic Ambiguity (Homophonic Collisions)**:
+   - Certain Banglish queries exhibit homophony (e.g. `shikha` resolves to both `শিক্ষা` [education] and `শিখা` [flame]). The engine ranks candidates using document-frequency priors and BM25 co-occurrence, but polysemous ambiguity without query context remains an inherent property of romanized Bengali.

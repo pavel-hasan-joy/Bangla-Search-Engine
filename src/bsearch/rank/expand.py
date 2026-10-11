@@ -90,12 +90,16 @@ class QueryExpander:
         self.df_provider = df_provider
         self.config = config or ExpansionConfig()
         self.parser = parser or get_default_parser()
+        self._token_cache: dict[str, TokenExpansion] = {}
 
     def expand_token(self, token: str) -> TokenExpansion:
         """Expand a single query token into weighted candidate Bangla terms."""
         clean_token = token.strip()
         if not clean_token:
             return TokenExpansion(token=token, is_bangla=False, candidates=[])
+
+        if clean_token in self._token_cache:
+            return self._token_cache[clean_token]
 
         # 1. Native Bangla token pass-through
         if is_bangla_word(clean_token):
@@ -109,7 +113,9 @@ class QueryExpander:
                 similarity=1.0,
                 edit_distance=0,
             )
-            return TokenExpansion(token=clean_token, is_bangla=True, candidates=[cand])
+            res = TokenExpansion(token=clean_token, is_bangla=True, candidates=[cand])
+            self._token_cache[clean_token] = res
+            return res
 
         # 2. Roman / Banglish token expansion
         cfg = self.config
@@ -117,6 +123,7 @@ class QueryExpander:
 
         # Map term -> dict of best candidate properties
         best_matches: dict[str, dict] = {}
+        seen_k2: set[str] = set()
 
         for ph in roman_candidates:
             q_k1 = to_k1(ph)
@@ -148,7 +155,8 @@ class QueryExpander:
                     )
 
             # --- Tier 3: Fuzzy K2 (~0.4 scaled by similarity) ---
-            if q_k2:
+            if q_k2 and q_k2 not in seen_k2:
+                seen_k2.add(q_k2)
                 fuzzy_k2s = self.phonetic_index.get_fuzzy_k2_candidates(q_k2)
                 for cand_k2, dist in fuzzy_k2s:
                     if dist > 0:
@@ -207,11 +215,13 @@ class QueryExpander:
         # Cap candidates per token
         pruned_candidates = candidates[: cfg.max_candidates_per_token]
 
-        return TokenExpansion(
+        res = TokenExpansion(
             token=clean_token,
             is_bangla=False,
             candidates=pruned_candidates,
         )
+        self._token_cache[clean_token] = res
+        return res
 
     @staticmethod
     def _update_candidate(

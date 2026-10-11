@@ -7,7 +7,7 @@ and transpositions of two adjacent characters) required to transform s1 into s2.
 from __future__ import annotations
 
 
-def damerau_levenshtein(s1: str, s2: str) -> int:
+def damerau_levenshtein(s1: str, s2: str, max_distance: int | None = None) -> int:
     """Compute exact Damerau-Levenshtein distance between strings s1 and s2.
 
     Supports:
@@ -18,6 +18,9 @@ def damerau_levenshtein(s1: str, s2: str) -> int:
     """
     len1 = len(s1)
     len2 = len(s2)
+
+    if max_distance is not None and abs(len1 - len2) > max_distance:
+        return max_distance + 1
 
     if len1 == 0:
         return len2

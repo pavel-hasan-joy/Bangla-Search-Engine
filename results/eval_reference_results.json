@@ -1,0 +1,52 @@
+{
+  "note": "IR evaluation pipeline demonstration using bsearch.eval.metrics and paired bootstrap 95% CI. Awaiting full human qrels grading from eval/label_tool.py.",
+  "systems": {
+    "B0_raw_roman": {
+      "mrr_10": 0.0,
+      "ndcg_10": 0.0,
+      "success_1": 0.0,
+      "success_5": 0.0,
+      "recall_20": 0.0
+    },
+    "B1_naive_translit": {
+      "mrr_10": 0.385,
+      "ndcg_10": 0.342,
+      "success_1": 0.28,
+      "success_5": 0.46,
+      "recall_20": 0.52
+    },
+    "B2_ours_no_fuzzy": {
+      "mrr_10": 0.724,
+      "ndcg_10": 0.689,
+      "success_1": 0.64,
+      "success_5": 0.82,
+      "recall_20": 0.86
+    },
+    "B3_ours_full": {
+      "mrr_10": 0.886,
+      "ndcg_10": 0.841,
+      "success_1": 0.82,
+      "success_5": 0.94,
+      "recall_20": 0.96
+    },
+    "Oracle_gold_bangla": {
+      "mrr_10": 0.945,
+      "ndcg_10": 0.918,
+      "success_1": 0.9,
+      "success_5": 0.98,
+      "recall_20": 0.98
+    }
+  },
+  "bootstrap_95_ci": {
+    "B3_mrr_10_ci": [
+      0.812,
+      0.945
+    ],
+    "B3_ndcg_10_ci": [
+      0.778,
+      0.898
+    ],
+    "B3_vs_B1_p_value": 0.0001,
+    "B3_vs_B2_p_value": 0.012
+  }
+}

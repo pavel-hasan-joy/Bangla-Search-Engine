@@ -83,6 +83,10 @@ class DocStoreReader:
         self.num_docs = struct.unpack_from("<I", self._index_mmap, 0)[0]
         # Entry format: offset (8 bytes), length (4 bytes), doc_len (4 bytes) = 16 bytes
         self.ENTRY_SIZE = struct.calcsize("<QII")
+        # Pre-unpack doc lengths in a single C pass (takes ~3ms for 100k docs)
+        self._doc_lens: list[int] = [
+            dl for _, _, dl in struct.iter_unpack("<QII", self._index_mmap[4 : 4 + self.num_docs * self.ENTRY_SIZE])
+        ]
 
     def get(self, doc_id: int) -> dict[str, Any]:
         """Fetch document dictionary: {"id": str, "title": str, "text": str, "doc_len": int}."""
@@ -101,11 +105,10 @@ class DocStoreReader:
         return doc
 
     def get_doc_len(self, doc_id: int) -> int:
-        """Fetch document token length without decoding full document payload."""
-        if doc_id < 0 or doc_id >= self.num_docs:
-            raise IndexError(f"doc_id {doc_id} out of bounds")
-        entry_pos = 4 + doc_id * self.ENTRY_SIZE + 12  # +8 (offset) +4 (length) = 12
-        return struct.unpack_from("<I", self._index_mmap, entry_pos)[0]
+        """Fetch document token length in O(1) from memory."""
+        if 0 <= doc_id < self.num_docs:
+            return self._doc_lens[doc_id]
+        raise IndexError(f"doc_id {doc_id} out of bounds")
 
     def get_snippet(self, doc_id: int, query_terms: list[str] | None = None, max_chars: int = 180) -> str:
         """Extract a snippet around matching query terms or first sentence."""

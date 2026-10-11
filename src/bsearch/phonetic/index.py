@@ -55,6 +55,7 @@ class PhoneticIndex:
         # Trigram index over K2 keys: trigram -> set of k2_keys
         self.k2_trigram_index: dict[str, set[str]] = defaultdict(set)
         self.k2_keys: set[str] = set()
+        self._fuzzy_cache: dict[str, list[tuple[str, int]]] = {}
 
     def add_term(self, term: str) -> tuple[str, str, str]:
         """Index a single Bengali vocabulary term."""
@@ -98,6 +99,9 @@ class PhoneticIndex:
         if not query_k2:
             return []
 
+        if query_k2 in self._fuzzy_cache:
+            return self._fuzzy_cache[query_k2]
+
         q_len = len(query_k2)
         max_dist = 1 if q_len <= 5 else 2
 
@@ -120,11 +124,13 @@ class PhoneticIndex:
             if abs(len(cand) - q_len) > max_dist:
                 continue
 
-            dist = damerau_levenshtein(query_k2, cand)
+            dist = damerau_levenshtein(query_k2, cand, max_distance=max_dist)
             if dist <= max_dist:
                 results[cand] = dist
 
-        return sorted(results.items(), key=lambda x: x[1])
+        sorted_res = sorted(results.items(), key=lambda x: x[1])
+        self._fuzzy_cache[query_k2] = sorted_res
+        return sorted_res
 
     def lookup(
         self,

@@ -1,0 +1,29 @@
+
+================================================================================
+  LATENCY BENCHMARK REPORT (100,000 DOCUMENTS / PASSAGES)
+================================================================================
+Documents Indexed:    100,000
+Vocabulary Size:      368 terms
+Index Disk Size:      166.33 MB
+Process RSS Memory:   59.12 MB
+Cold Load Time:       27.34 ms
+Queries Evaluated:    1,050
+Throughput:           11.3 QPS (single-thread)
+Target (p95 <= 100ms): [MISSED]
+--------------------------------------------------------------------------------
+Hardware Specifications:
+  CPU:                Intel64 Family 6 Model 186 Stepping 3, GenuineIntel
+  Logical Cores:      12
+  System RAM:         7.71 GB
+  Operating System:   Windows 10 (10.0.26300)
+  Python Runtime:     CPython 3.11.17
+--------------------------------------------------------------------------------
+Per-Stage Latency Breakdown (Single-Thread Warm, ms):
+Pipeline Stage               p50        p90        p95        p99        Mean      
+------------------------------------------------------------------------------
+1. Tokenization              0.03       0.06       0.08       0.17       0.04      
+2. Phonetic Expansion        0.01       1.06       2.14       4.03       0.33      
+3. BM25 Postings Scoring     66.93      182.20     222.83     324.47     85.76     
+4. DocStore Snippet Fetch    1.74       3.64       4.02       6.61       1.91      
+TOTAL (End-to-End)           68.97      184.41     225.91     326.96     88.04     
+================================================================================

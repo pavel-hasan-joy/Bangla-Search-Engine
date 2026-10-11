@@ -1,0 +1,64 @@
+{
+  "benchmark_timestamp": "2026-10-11 11:38:43",
+  "machine_specs": {
+    "os": "Windows 10 (10.0.26300)",
+    "processor": "Intel64 Family 6 Model 186 Stepping 3, GenuineIntel",
+    "machine": "AMD64",
+    "cpu_count_logical": 12,
+    "python_version": "CPython 3.11.17",
+    "ram_total_gb": 7.71,
+    "ram_avail_gb": 0.35
+  },
+  "corpus_docs": 100000,
+  "vocab_size": 368,
+  "index_size_mb": 166.33,
+  "index_size_bytes": 174404433,
+  "build_time_seconds": 51.70,
+  "process_rss_mb": 59.12,
+  "cold_load_time_ms": 27.34,
+  "queries_evaluated": 1050,
+  "throughput_qps": 11.34,
+  "target_p95_under_100ms": false,
+  "latency_percentiles_ms": {
+    "tokenization": {
+      "p50": 0.028,
+      "p90": 0.057,
+      "p95": 0.076,
+      "p99": 0.167,
+      "mean": 0.037,
+      "max": 0.742
+    },
+    "phonetic_expansion": {
+      "p50": 0.005,
+      "p90": 1.058,
+      "p95": 2.14,
+      "p99": 4.026,
+      "mean": 0.326,
+      "max": 8.342
+    },
+    "postings_bm25_scoring": {
+      "p50": 66.931,
+      "p90": 182.202,
+      "p95": 222.833,
+      "p99": 324.466,
+      "mean": 85.758,
+      "max": 630.125
+    },
+    "docstore_snippet_fetch": {
+      "p50": 1.735,
+      "p90": 3.639,
+      "p95": 4.018,
+      "p99": 6.605,
+      "mean": 1.913,
+      "max": 53.769
+    },
+    "total_query": {
+      "p50": 68.975,
+      "p90": 184.406,
+      "p95": 225.91,
+      "p99": 326.959,
+      "mean": 88.041,
+      "max": 631.751
+    }
+  }
+}

@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bangla Search Engine | Banglish-Aware Search</title>
+  <meta name="description" content="High-performance search engine for Bengali text supporting Banglish romanization and native Bengali queries.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-content">
+        <div class="logo">
+          <div class="logo-icon">বা</div>
+          <div class="logo-text">
+            <h1>Bangla Search</h1>
+            <span class="pitch-tagline">"I type in Banglish myself, so I built a search engine that understands it."</span>
+          </div>
+        </div>
+        <div class="header-badges">
+          <span class="badge badge-accent" id="stats-badge">Loading index stats...</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Search Section -->
+    <section class="search-section">
+      <form class="search-form" id="search-form">
+        <div class="search-input-wrapper">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input
+            type="text"
+            id="query-input"
+            class="search-input"
+            placeholder="Search in Banglish or Bangla (e.g. 'shikkha', 'dhaka', 'বিজ্ঞান')..."
+            autocomplete="off"
+            autofocus
+          >
+          <button type="button" id="clear-btn" class="clear-btn" title="Clear search" style="display: none;">&times;</button>
+          <button type="submit" id="search-btn" class="search-btn">
+            <span>Search</span>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+              <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Controls Bar -->
+        <div class="controls-bar">
+          <div class="control-group">
+            <label for="combiner-select">Combiner Strategy:</label>
+            <select id="combiner-select" class="select-input">
+              <option value="saturating_sum" selected>Saturating Sum (Soft Saturation)</option>
+              <option value="max">Max (Single Best Candidate)</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label for="topk-select">Top-K Results:</label>
+            <select id="topk-select" class="select-input">
+              <option value="10" selected>10 Results</option>
+              <option value="20">20 Results</option>
+              <option value="50">50 Results</option>
+            </select>
+          </div>
+          <div class="quick-tags">
+            <span class="quick-label">Try:</span>
+            <button type="button" class="tag-btn" data-query="shikkha">shikkha</button>
+            <button type="button" class="tag-btn" data-query="sikkha">sikkha</button>
+            <button type="button" class="tag-btn" data-query="shikha">shikha</button>
+            <button type="button" class="tag-btn" data-query="dhaka">dhaka</button>
+            <button type="button" class="tag-btn" data-query="biggan">biggan</button>
+            <button type="button" class="tag-btn" data-query="বাংলাদেশ">বাংলাদেশ</button>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <!-- Expansion Bar -->
+    <section class="expansion-section" id="expansion-section" style="display: none;">
+      <div class="expansion-card">
+        <div class="expansion-header">
+          <div class="expansion-title">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+            </svg>
+            <span>Phonetic Candidate Expansion</span>
+          </div>
+          <div class="meta-timing" id="timing-badge">0.0 ms</div>
+        </div>
+        <div class="expansion-tokens" id="expansion-tokens"></div>
+      </div>
+    </section>
+
+    <!-- Results Section -->
+    <main class="results-section">
+      <div class="results-header" id="results-header" style="display: none;">
+        <span class="results-count" id="results-count">Found 0 results</span>
+      </div>
+
+      <div class="results-list" id="results-list">
+        <div class="initial-state" id="initial-state">
+          <div class="initial-icon">🔍</div>
+          <h3>Type a Banglish query to begin</h3>
+          <p>The phonetic engine maps your romanized input to authentic Bengali orthography using multi-level phonetic keys.</p>
+        </div>
+      </div>
+
+      <!-- Loading Spinner -->
+      <div class="loading-spinner" id="loading-spinner" style="display: none;">
+        <div class="spinner"></div>
+        <p>Retrieving documents...</p>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <p>Bangla Search Engine • Core standard library implementation • Corpus derived from Bengali Wikipedia (CC BY-SA 4.0)</p>
+    </footer>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
