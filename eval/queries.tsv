@@ -1,0 +1,4 @@
+id	query	category	gold_bangla_query	intent_note
+# Template for evaluation queries. Fill with real user queries (do not fabricate).
+# Categories: single_word, multi_word, spelling_variant, loanword, name, typo, mixed_script
+# Dev/Test split: id prefix 'dev_' (20 queries) and 'test_' (30 queries)

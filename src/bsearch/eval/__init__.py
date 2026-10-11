@@ -1,1 +1,51 @@
-"""Information retrieval evaluation metrics: MRR, MAP, NDCG, Precision, Recall."""
+"""Information Retrieval evaluation tooling: metrics, systems, labeling, and runner."""
+
+from bsearch.eval.metrics import (
+    BootstrapComparison,
+    QueryMetrics,
+    SystemAggregateMetrics,
+    aggregate_system_metrics,
+    compute_dcg_at_k,
+    compute_mrr_at_k,
+    compute_ndcg_at_k,
+    compute_recall_at_k,
+    compute_success_at_k,
+    evaluate_query,
+    generate_ablation_table,
+    generate_category_table,
+    paired_bootstrap_test,
+)
+from bsearch.eval.systems import (
+    B0System,
+    B1System,
+    B2System,
+    B3System,
+    BaseSystem,
+    OracleSystem,
+    build_systems,
+    static_transliterate,
+)
+
+__all__ = [
+    "B0System",
+    "B1System",
+    "B2System",
+    "B3System",
+    "BaseSystem",
+    "BootstrapComparison",
+    "OracleSystem",
+    "QueryMetrics",
+    "SystemAggregateMetrics",
+    "aggregate_system_metrics",
+    "build_systems",
+    "compute_dcg_at_k",
+    "compute_mrr_at_k",
+    "compute_ndcg_at_k",
+    "compute_recall_at_k",
+    "compute_success_at_k",
+    "evaluate_query",
+    "generate_ablation_table",
+    "generate_category_table",
+    "paired_bootstrap_test",
+    "static_transliterate",
+]

@@ -207,6 +207,39 @@ pytest tests/ -v
     python -m bsearch.search "shikkha" --combiner max --explain -k 5
     ```
 
+### Task 5: Evaluation Tooling & Benchmarking Suite (`bsearch.eval`)
+- **Queries Template & Checklist** ([`queries.tsv`](file:///d:/projects/bangla%20search%20engine/eval/queries.tsv), [`CHECKLIST.md`](file:///d:/projects/bangla%20search%20engine/eval/CHECKLIST.md)):
+  - Strictly user-provided ground-truth queries and judgments (no synthetic labels).
+  - Schema: `id`, `query`, `category`, `gold_bangla_query`, `intent_note`.
+  - Required categories: `single_word`, `multi_word`, `spelling_variant` ($\ge 10$ intents $\times$ 2-3 spellings), `loanword`, `name`, `typo`, `mixed_script`.
+  - Dev/Test split: 20 development (`dev_01`..`dev_20`) / 30 test (`test_01`..`test_30`).
+- **Five Evaluation Systems** ([`systems.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/eval/systems.py)):
+  - **`B0`**: Raw Roman string directly searched with plain BM25.
+  - **`B1`**: Static 1-to-1 transliteration + plain BM25 (naive deterministic baseline).
+  - **`B2`**: Ours without fuzzy (K1, K2 exact, K3 skeleton, candidate combiner).
+  - **`B3`**: Full system (K1, K2, Fuzzy K2 with similarity scaling, K3, combiners).
+  - **`Oracle`**: BM25 using human gold native Bengali query.
+- **Relevance Judgment Labeling Tool** ([`label_tool.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/eval/label_tool.py), [`eval/label_tool.py`](file:///d:/projects/bangla%20search%20engine/eval/label_tool.py)):
+  - Pools top-20 documents across all systems per query.
+  - Presents documents system-blind in random order to prevent bias.
+  - Human grades: `0` (Not Relevant), `1` (Partially Relevant), `2` (Highly Relevant).
+  - Resumable: writes directly to [`eval/qrels.tsv`](file:///d:/projects/bangla%20search%20engine/eval/qrels.tsv).
+    ```powershell
+    python eval/label_tool.py
+    ```
+- **Information Retrieval Metrics** ([`metrics.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/eval/metrics.py)):
+  - **MRR@10**: Mean Reciprocal Rank at cutoff 10.
+  - **nDCG@10**: Graded Discounted Cumulative Gain normalized by IDCG@10.
+  - **Success@1** & **Success@5**: Binary success at rank 1 and within top-5.
+  - **Recall@20**: Proportion of all known relevant documents retrieved in top-20.
+  - Validated mathematically against hand-worked reference calculations.
+  - **Paired Bootstrap Hypothesis Testing**: Computes 95% Confidence Intervals and $p$-values over 1,000 resamples.
+  - Markdown table formatters for system ablation and per-category analysis.
+- **Evaluation Runner CLI** ([`runner.py`](file:///d:/projects/bangla%20search%20engine/src/bsearch/eval/runner.py)):
+  ```powershell
+  python -m bsearch.eval.runner --queries eval/queries.tsv --qrels eval/qrels.tsv
+  ```
+
 ---
 
 ## License & Attribution
